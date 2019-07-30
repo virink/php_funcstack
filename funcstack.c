@@ -34,6 +34,7 @@ static void php_funcstack_log(char *filename, char *fname, uint32_t lineno, char
 static int php_funcstack_opcode_handler(zend_execute_data *execute_data)
 {
     const zend_op *opline = execute_data->opline;
+    zend_execute_data *ex = EG(current_execute_data);
     zend_execute_data *call = execute_data->call;
 
     char *filename = "";
@@ -41,9 +42,6 @@ static int php_funcstack_opcode_handler(zend_execute_data *execute_data)
     char *fname = "";
     char *inc = "";
 
-    // Get FileName and LineNo
-    // zend_execute_data *ex = execute_data;
-    zend_execute_data *ex = EG(current_execute_data);
     while (ex && (!ex->func || !ZEND_USER_CODE(ex->func->type))) {
         ex = ex->prev_execute_data;
     }
@@ -113,11 +111,6 @@ PHP_MINIT_FUNCTION(funcstack)
 {
     REGISTER_INI_ENTRIES();
     if(FS_G(enable)){
-        // zend_set_user_opcode_handler();
-        // 初始化自定义函数
-        // zend_set_user_opcode_handler(ZEND_INIT_FCALL_BY_NAME, php_funcstack_opcode_handler);
-        // 初始化内置函数
-        // zend_set_user_opcode_handler(ZEND_INIT_FCALL, php_funcstack_opcode_handler);
         zend_set_user_opcode_handler(ZEND_DO_ICALL, php_funcstack_opcode_handler);
         zend_set_user_opcode_handler(ZEND_DO_UCALL, php_funcstack_opcode_handler);
         zend_set_user_opcode_handler(ZEND_DO_FCALL, php_funcstack_opcode_handler);
@@ -148,11 +141,6 @@ PHP_RINIT_FUNCTION(funcstack)
 	return SUCCESS;
 }
 
-PHP_RSHUTDOWN_FUNCTION(funcstack)
-{
-    return SUCCESS;
-}
-
 static const zend_function_entry funcstack_functions[] = {
 	PHP_FE_END
 };
@@ -173,7 +161,7 @@ zend_module_entry funcstack_module_entry = {
 	PHP_MINIT(funcstack),			/* PHP_MINIT - Module initialization */
 	PHP_MSHUTDOWN(funcstack),		/* PHP_MSHUTDOWN - Module shutdown */
 	PHP_RINIT(funcstack),			/* PHP_RINIT - Request initialization */
-	PHP_RSHUTDOWN(funcstack),		/* PHP_RSHUTDOWN - Request shutdown */
+	NULL,		                    /* PHP_RSHUTDOWN - Request shutdown */
 	PHP_MINFO(funcstack),			/* PHP_MINFO - Module info */
 	PHP_FUNCSTACK_VERSION,		    /* Version */
 	STANDARD_MODULE_PROPERTIES
