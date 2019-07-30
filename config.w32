@@ -1,0 +1,7 @@
+ARG_ENABLE('funcstack', 'funcstack support', 'no');
+
+if (PHP_FUNCSTACK != 'no') {
+	AC_DEFINE('HAVE_FUNCSTACK', 1, 'funcstack support enabled');
+
+	EXTENSION('funcstack', 'funcstack.c', null, '/DZEND_ENABLE_STATIC_TSRMLS_CACHE=1');
+}
