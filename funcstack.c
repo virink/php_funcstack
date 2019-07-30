@@ -8,28 +8,38 @@
 #include "ext/standard/info.h"
 #include "php_funcstack.h"
 
-// #define DEBUG 1
+ZEND_DECLARE_MODULE_GLOBALS(funcstack)
 
-static void php_funcstack_log(char *filename, char *fname, uint32_t lineno, zval *inc){
-    // if(DEBUG){
+PHP_INI_BEGIN()
+    STD_PHP_INI_BOOLEAN("funcstack.enable", "0", PHP_INI_ALL, OnUpdateBool, enable, zend_funcstack_globals, funcstack_globals)
+    STD_PHP_INI_BOOLEAN("funcstack.deep", "0", PHP_INI_ALL, OnUpdateBool, deep, zend_funcstack_globals, funcstack_globals)
+    STD_PHP_INI_BOOLEAN("funcstack.debug", "0", PHP_INI_ALL, OnUpdateBool, debug, zend_funcstack_globals, funcstack_globals)
+    STD_PHP_INI_ENTRY("funcstack.logpath", "/tmp/func.stack", PHP_INI_ALL, OnUpdateString, logpath, zend_funcstack_globals, funcstack_globals)
+PHP_INI_END()
+
+static void php_funcstack_log(char *filename, char *fname, uint32_t lineno, char *inc){
+    if(FS_G(debug)){
+        printf("[+] %d %d [%s:%d] %s => %s\n", stack, level, filename, lineno, fname, inc);
+    }else{
+        FILE *fp;
+        fp = fopen(FS_G(logpath), "ab+");
+        if (fp) {
+            fprintf(fp, "[+]\x99%d\x99%d\x99%s\x99%d\x99%s\x99%s\n", stack, level, filename, lineno, fname, inc);
+            fclose(fp);
+        }
+    }
         
-    // }
-    printf("[+] ==========================\n");
-    printf("[+] %d %d [%s:(%d)] %s => %s\n", stack, level, filename, lineno, fname, inc);
-    // printf("[+] %d %s:%d %s %s\n", stack, filename, lineno, Z_STRVAL_P(function_name),
-    //     "");
 }
 
 static int php_funcstack_opcode_handler(zend_execute_data *execute_data)
 {
-    zend_op *opline = execute_data->opline;
+    const zend_op *opline = execute_data->opline;
+    zend_execute_data *call = execute_data->call;
 
     char *filename = "";
     uint32_t lineno = 0;
-
     char *fname = "";
     char *inc = "";
-
 
     // Get FileName and LineNo
     // zend_execute_data *ex = execute_data;
@@ -51,20 +61,15 @@ static int php_funcstack_opcode_handler(zend_execute_data *execute_data)
     }
 
     switch(opline->opcode){
-        case ZEND_INIT_FCALL:
-            // ???
-            // if (!zend_is_executing()) break;
-            // ??????
-            // if(!deep)
-                // break;
+        case ZEND_DO_ICALL:
+            if(!FS_G(deep))
+                break;
+        case ZEND_DO_UCALL:
+        case ZEND_DO_FCALL:
+        case ZEND_DO_FCALL_BY_NAME:
             level++;
-        case ZEND_INIT_FCALL_BY_NAME:
             stack++;
-            zend_function *fbc;
-            fbc = CACHED_PTR(opline->result.num);
-            if (UNEXPECTED(fbc == NULL)) {
-                fname = Z_STRVAL_P((zval*)RT_CONSTANT(opline, opline->op2));
-            }
+            fname = ((zend_string *)((zend_function *)call->func)->common.function_name)->val;
             break;
         case ZEND_INCLUDE_OR_EVAL:
             level++;
@@ -95,13 +100,10 @@ static int php_funcstack_opcode_handler(zend_execute_data *execute_data)
             level--;
             break;
     }
-    if (opline->opcode != ZEND_RETURN){
+    if(opline->opcode == ZEND_DO_ICALL && !FS_G(deep))
+        return ZEND_USER_OPCODE_DISPATCH;
+    if (opline->opcode != ZEND_RETURN ){
         php_funcstack_log(filename, fname, lineno, inc);
-        // printf("[+] ==========================\n");
-        // printf("[+] level : %d\n", level);
-        // printf("[+] lineno : %d\n", lineno);
-        // printf("[+] lineno : %d\n", lineno);
-        // printf("[+] stack : %d\n", stack);
     }
     return ZEND_USER_OPCODE_DISPATCH;
 }
@@ -109,26 +111,28 @@ static int php_funcstack_opcode_handler(zend_execute_data *execute_data)
 
 PHP_MINIT_FUNCTION(funcstack)
 {
-    // zend_set_user_opcode_handler();
-    // 初始化自定义函数
-    zend_set_user_opcode_handler(ZEND_INIT_FCALL_BY_NAME, php_funcstack_opcode_handler);
-    // 初始化内置函数
-    zend_set_user_opcode_handler(ZEND_INIT_FCALL, php_funcstack_opcode_handler);
-
-    // zend_set_user_opcode_handler(ZEND_DO_FCALL, php_funcstack_opcode_handler);
-    // zend_set_user_opcode_handler(ZEND_DO_FCALL_BY_NAME, php_funcstack_opcode_handler);
-    // 
-    zend_set_user_opcode_handler(ZEND_INCLUDE_OR_EVAL, php_funcstack_opcode_handler);
-    //
-    // zend_set_user_opcode_handler(ZEND_ECHO, php_funcstack_opcode_handler);
-    // zend_set_user_opcode_handler(ZEND_PRINT, php_funcstack_opcode_handler);
-    //
-    zend_set_user_opcode_handler(ZEND_RETURN, php_funcstack_opcode_handler);
+    REGISTER_INI_ENTRIES();
+    if(FS_G(enable)){
+        // zend_set_user_opcode_handler();
+        // 初始化自定义函数
+        // zend_set_user_opcode_handler(ZEND_INIT_FCALL_BY_NAME, php_funcstack_opcode_handler);
+        // 初始化内置函数
+        // zend_set_user_opcode_handler(ZEND_INIT_FCALL, php_funcstack_opcode_handler);
+        zend_set_user_opcode_handler(ZEND_DO_ICALL, php_funcstack_opcode_handler);
+        zend_set_user_opcode_handler(ZEND_DO_UCALL, php_funcstack_opcode_handler);
+        zend_set_user_opcode_handler(ZEND_DO_FCALL, php_funcstack_opcode_handler);
+        zend_set_user_opcode_handler(ZEND_DO_FCALL_BY_NAME, php_funcstack_opcode_handler);
+        // 
+        zend_set_user_opcode_handler(ZEND_INCLUDE_OR_EVAL, php_funcstack_opcode_handler);
+        // 
+        zend_set_user_opcode_handler(ZEND_RETURN, php_funcstack_opcode_handler);
+    }
     return SUCCESS;
 }
 
 PHP_MSHUTDOWN_FUNCTION(funcstack)
 {
+    UNREGISTER_INI_ENTRIES();
     return SUCCESS;
 }
 
@@ -137,8 +141,10 @@ PHP_RINIT_FUNCTION(funcstack)
 #if defined(ZTS) && defined(COMPILE_DL_FUNCSTACK)
 	ZEND_TSRMLS_CACHE_UPDATE();
 #endif
-    level = 0;
-    stack = 0;
+    if(FS_G(enable)){
+        level = 0;
+        stack = 0;
+    }
 	return SUCCESS;
 }
 
@@ -147,15 +153,10 @@ PHP_RSHUTDOWN_FUNCTION(funcstack)
     return SUCCESS;
 }
 
-/* {{{ funcstack_functions[]
- */
 static const zend_function_entry funcstack_functions[] = {
 	PHP_FE_END
 };
-/* }}} */
 
-/* {{{ PHP_MINFO_FUNCTION
- */
 PHP_MINFO_FUNCTION(funcstack)
 {
 	php_info_print_table_start();
@@ -164,10 +165,7 @@ PHP_MINFO_FUNCTION(funcstack)
     php_info_print_table_row(2, "Author", PHP_FUNCSTACK_AUTHOR);
 	php_info_print_table_end();
 }
-/* }}} */
 
-/* {{{ funcstack_module_entry
- */
 zend_module_entry funcstack_module_entry = {
 	STANDARD_MODULE_HEADER,
 	"funcstack",					/* Extension name */
@@ -177,10 +175,9 @@ zend_module_entry funcstack_module_entry = {
 	PHP_RINIT(funcstack),			/* PHP_RINIT - Request initialization */
 	PHP_RSHUTDOWN(funcstack),		/* PHP_RSHUTDOWN - Request shutdown */
 	PHP_MINFO(funcstack),			/* PHP_MINFO - Module info */
-	PHP_FUNCSTACK_VERSION,		/* Version */
+	PHP_FUNCSTACK_VERSION,		    /* Version */
 	STANDARD_MODULE_PROPERTIES
 };
-/* }}} */
 
 #ifdef COMPILE_DL_FUNCSTACK
 # ifdef ZTS
